@@ -1,0 +1,59 @@
+[project]
+name = "autoresearch-lab"
+version = "0.1.0"
+description = "General-purpose autonomous research engine with program generation"
+requires-python = ">=3.10"
+dependencies = [
+    "pyyaml",
+    "jinja2",
+]
+
+[project.optional-dependencies]
+# CUDA backend (karpathy/autoresearch original)
+cuda = [
+    "kernels",
+    "matplotlib",
+    "numpy",
+    "pandas",
+    "pyarrow",
+    "requests",
+    "rustbpe",
+    "tiktoken",
+    "torch==2.9.1",
+]
+# Apple Silicon MLX backend
+mlx = [
+    "mlx>=0.30.0",
+    "numpy",
+    "pyarrow",
+    "regex",
+    "requests",
+    "rustbpe",
+    "tiktoken",
+]
+# Program generator (lightweight, no ML deps)
+generator = [
+    "pyyaml",
+    "jinja2",
+]
+# LLM-powered generator (supports any provider via litellm)
+llm = [
+    "pyyaml",
+    "jinja2",
+    "litellm",
+]
+# Domain experiment scaffolding
+domain = [
+    "pandas",
+    "numpy",
+    "scikit-learn",
+    "pyarrow",
+    "openpyxl",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["generator"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

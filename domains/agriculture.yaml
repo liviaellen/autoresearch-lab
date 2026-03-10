@@ -1,0 +1,104 @@
+name: Agriculture
+description: Crop yield prediction, soil analysis, and agricultural optimization
+
+questions:
+  - id: crop
+    prompt: What crop are you analyzing?
+    type: text
+    required: true
+
+  - id: goal
+    prompt: What is the research goal?
+    type: choice
+    choices:
+      - Predict crop yield
+      - Classify crop disease
+      - Optimize irrigation
+      - Predict soil quality
+      - Other
+    required: true
+
+  - id: env_variables
+    prompt: What environmental variables are available (comma-separated)?
+    type: text
+    default: "temperature, rainfall, humidity, soil_ph, sunlight_hours"
+    required: true
+
+  - id: task_type
+    prompt: Is this a prediction or classification task?
+    type: choice
+    choices:
+      - prediction
+      - classification
+    required: true
+
+  - id: metric
+    prompt: What evaluation metric matters most?
+    type: choice
+    choices:
+      - MAE
+      - RMSE
+      - R-squared
+      - Accuracy
+      - F1-score
+    default: MAE
+    required: true
+
+  - id: dataset_path
+    prompt: Path to your dataset (CSV file)
+    type: text
+    required: true
+
+  - id: interpretability
+    prompt: Is model interpretability required?
+    type: choice
+    choices:
+      - "yes"
+      - "no"
+    default: "yes"
+    required: true
+
+  - id: time_budget
+    prompt: Time budget per experiment (minutes)
+    type: number
+    default: 5
+    required: true
+
+constraints:
+  - Models must provide feature importance when interpretability is required
+  - Preserve seasonal patterns in time-series data
+  - Handle missing environmental sensor readings gracefully
+
+defaults:
+  metric: MAE
+  time_budget: 5
+
+answer_mapping:
+  goal: objective
+  dataset_path: dataset_path
+  metric: metric
+  time_budget: time_budget
+
+template_defaults:
+  dataset_description: "Agricultural dataset with crop, environmental, and soil features."
+  strategy: |
+    Start with tree-based models (Random Forest, XGBoost).
+    Then test gradient boosting variants.
+    Finally explore neural network approaches if time permits.
+    Focus on feature engineering with domain knowledge.
+  model_families:
+    - Random Forest
+    - XGBoost / LightGBM
+    - Gradient Boosting
+    - Neural Networks (if time permits)
+  allowed_files:
+    - train.py
+    - train_mlx.py
+  forbidden_actions:
+    - Installing new packages
+    - Modifying evaluation pipeline
+    - Modifying data loading
+    - Removing validation split
+  reporting: |
+    Log results to results.tsv (tab-separated).
+    Include feature importance rankings for kept experiments.

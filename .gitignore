@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+.DS_Store
+
+# Secrets
+.env
+
+# Project
+run.log
+results.tsv
+results/
+worktrees/
+dev/
+experiments/
+sample_data/
+
+# Data cache
+*.parquet
+
+# Logs
+*.log

@@ -1,0 +1,103 @@
+name: Social Science
+description: Behavioral research, survey analysis, and demographic studies
+
+questions:
+  - id: behavior
+    prompt: What behavior or outcome are you studying?
+    type: text
+    required: true
+
+  - id: goal
+    prompt: What is the research goal?
+    type: choice
+    choices:
+      - Predict behavior
+      - Classify groups
+      - Identify risk factors
+      - Measure intervention effects
+      - Other
+    required: true
+
+  - id: demographics
+    prompt: What demographic variables are available (comma-separated)?
+    type: text
+    default: "age, gender, income, education, location"
+    required: true
+
+  - id: task_type
+    prompt: Is this prediction or classification?
+    type: choice
+    choices:
+      - prediction
+      - classification
+    required: true
+
+  - id: metric
+    prompt: Primary evaluation metric
+    type: choice
+    choices:
+      - AUC-ROC
+      - F1-score
+      - Accuracy
+      - MAE
+      - RMSE
+    default: AUC-ROC
+    required: true
+
+  - id: dataset_path
+    prompt: Path to your dataset
+    type: text
+    required: true
+
+  - id: fairness
+    prompt: What fairness constraints exist?
+    type: text
+    default: "Demographic parity across protected groups"
+    required: false
+
+  - id: time_budget
+    prompt: Time budget per experiment (minutes)
+    type: number
+    default: 5
+    required: true
+
+constraints:
+  - Enforce fairness constraints across protected demographic groups
+  - Handle class imbalance appropriately
+  - Report disaggregated metrics by demographic group
+  - Avoid using protected attributes as direct features unless justified
+
+defaults:
+  metric: AUC-ROC
+  time_budget: 5
+
+answer_mapping:
+  goal: objective
+  dataset_path: dataset_path
+  metric: metric
+  time_budget: time_budget
+
+template_defaults:
+  dataset_description: "Social science dataset with behavioral outcomes and demographic features."
+  strategy: |
+    Start with logistic regression as interpretable baseline.
+    Then test tree-based ensemble methods.
+    Evaluate fairness metrics alongside performance.
+    Apply bias mitigation if fairness constraints are violated.
+  model_families:
+    - Logistic Regression
+    - Random Forest
+    - XGBoost
+    - Fairness-aware classifiers
+  allowed_files:
+    - train.py
+    - train_mlx.py
+  forbidden_actions:
+    - Installing new packages
+    - Modifying evaluation pipeline
+    - Removing fairness checks
+    - Using protected attributes without justification
+  reporting: |
+    Log results to results.tsv (tab-separated).
+    Include disaggregated metrics by demographic group.
+    Flag any fairness constraint violations.
