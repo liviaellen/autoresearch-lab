@@ -25,3 +25,9 @@ sample_data/
 
 # Logs
 *.log
+
+# Generated images
+*.png
+
+# Excalidraw skill (external clone)
+.claude/skills/

@@ -94,45 +94,65 @@ Pre-configured domains: **agriculture**, **healthcare**, **social science**, **f
 
 ## Quick start
 
-### Domain experiments (tabular data)
+### 1. Scaffold an experiment
 
 ```bash
-# Clone and setup
 git clone <repo-url>
 cd autoresearch-lab
-
-# Install with domain experiment support
 uv pip install -e ".[domain]"
 
-# Scaffold an experiment from your CSV
+# Auto-detect — just point at your data
+uv run python -m generator.scaffold \
+    --data path/to/data.csv \
+    --output-dir experiments/my-experiment
+
+# Or specify everything manually
 uv run python -m generator.scaffold \
     --data path/to/data.csv \
     --target target_column \
     --metric mae \
     --task regression \
     --output-dir experiments/my-experiment
+```
 
-# Run the baseline
+Auto-detect analyzes your data and picks the target column, task type, and metric. You can override any of them.
+
+Supported metrics: `mae`, `rmse`, `r2` (regression) | `auc`, `f1`, `accuracy` (classification)
+
+### 2. Run the baseline
+
+```bash
 cd experiments/my-experiment
 uv run python train.py
 ```
 
-Supported metrics: `mae`, `rmse`, `r2` (regression) | `auc`, `f1`, `accuracy` (classification)
+The baseline prints a **time budget suggestion** based on how fast it trained — tells you whether to increase or decrease `TIME_BUDGET` in `prepare.py` before running overnight.
+
+### 3. Run the autonomous loop
+
+```bash
+# Initialize git (the agent uses commits to track experiments)
+git init && git add -A && git commit -m "baseline"
+
+# Launch Claude Code in autonomous mode
+claude --dangerously-skip-permissions
+```
+
+Claude reads `program.md`, understands the rules, and loops forever:
+
+```
+Edit train.py → git commit → uv run train.py → better? → keep or revert → repeat
+```
+
+The agent only commits `train.py` — never pushes, never commits logs or results.
 
 ### Language model pretraining (original autoresearch)
 
 ```bash
-# Copy environment config
 cp .env.example .env
-
-# Install dependencies
 uv sync
-
-# Prepare data (one-time download + tokenizer training)
 uv run prepare_mlx.py              # macOS (Apple Silicon)
 uv run prepare.py                  # Linux/CUDA
-
-# Run an experiment (5-minute time budget)
 uv run train_mlx.py                # macOS
 uv run train.py                    # CUDA
 ```
@@ -142,12 +162,24 @@ uv run train.py                    # CUDA
 Generate a complete experiment directory from your data:
 
 ```bash
+# Auto-detect everything (just point at data)
 uv run python -m generator.scaffold \
-    --data sample_data/crop_data.csv \
+    --data data.csv \
+    --output-dir experiments/my-experiment
+
+# Auto-detect with LLM (smarter analysis)
+uv run python -m generator.scaffold \
+    --data data.csv \
+    --output-dir experiments/my-experiment \
+    --llm --model gpt4o
+
+# Manual (specify everything)
+uv run python -m generator.scaffold \
+    --data data.csv \
     --target yield \
     --metric mae \
     --task regression \
-    --output-dir experiments/crop-yield \
+    --output-dir experiments/my-experiment \
     --time-budget 300
 ```
 
@@ -156,12 +188,19 @@ This creates:
 | File | Purpose |
 |------|---------|
 | `prepare.py` | Data loading + evaluation harness (DO NOT MODIFY) |
-| `train.py` | Baseline model (agent edits this) |
-| `program.md` | Experiment rules and constraints |
+| `train.py` | Universal baseline model (agent edits this — works for any dataset) |
+| `program.md` | Experiment rules, git rules, and constraints |
+| `flow.excalidraw` | Visual flow diagram (open in [excalidraw.com](https://excalidraw.com)) |
 | `pyproject.toml` | Dependencies for the experiment |
-| `.gitignore` | Ignores logs and results |
+| `.gitignore` | Ignores logs, results, and build artifacts |
 
-The generated `train.py` includes a working sklearn pipeline with automatic column type detection, categorical encoding, and a GradientBoosting baseline.
+### How it works
+
+- **`prepare.py`** is generated per-experiment with the data path, target column, metric, and eval function baked in. Read-only.
+- **`train.py`** is universal — one file works for any dataset. It reads `TASK_TYPE` from `prepare.py` and auto-selects the right model (GradientBoostingRegressor or GradientBoostingClassifier). The agent modifies this file.
+- **Auto-detect** analyzes column types, names, and cardinality to guess target/task/metric. You can override any field.
+- **Time budget suggestion** — after the baseline runs, it suggests an appropriate `TIME_BUDGET` based on training time.
+- **Flow diagram** — each experiment gets a customized Excalidraw diagram showing the data flow and experiment loop with the actual metric name.
 
 ## Generating program.md
 
@@ -313,6 +352,7 @@ autoresearch-lab/
 ├── program.md                       ← experiment protocol
 ├── generator/
 │   ├── scaffold.py                  ← experiment scaffolder (data → full experiment dir)
+│   ├── auto_detect.py               ← auto-detect target/task/metric from data
 │   ├── program_generator.py         ← unified CLI (template + LLM modes)
 │   ├── llm_generator.py             ← LLM conversation engine
 │   ├── llm_client.py                ← provider-agnostic client (LiteLLM)
@@ -355,6 +395,10 @@ uv pip install -e ".[llm,cuda]"     # Linux/NVIDIA
 - [x] Multi-provider LLM support (OpenAI, Claude, Ollama, Groq, Together, etc.)
 - [x] Domain configs (agriculture, healthcare, social science, finance)
 - [x] Experiment scaffold (auto-generate prepare.py + train.py from data)
+- [x] Auto-detect target/task/metric from data (heuristic + LLM)
+- [x] Universal train.py (one file works for regression and classification)
+- [x] Flow diagram generation (Excalidraw per experiment)
+- [x] Time budget suggestion (based on baseline training time)
 - [ ] Experiment memory (persist learnings across runs via mem0)
 - [ ] Multi-agent research teams (design + execution + analysis agents)
 - [ ] Automated research report generation
