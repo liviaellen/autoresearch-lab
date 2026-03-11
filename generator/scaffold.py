@@ -200,6 +200,35 @@ def evaluate(model, X_val, y_val):
 {metric["eval_body"]}
 
 
+def cross_validate(model, X, y, k=5):
+    """Run k-fold cross-validation. Returns (mean_score, std_score, fold_scores).
+
+    This is the PRIMARY metric for keep/discard decisions.
+    More reliable than a single train/val split.
+    """
+    from sklearn.model_selection import StratifiedKFold, KFold
+    import copy
+
+    if TASK_TYPE == "classification":
+        folder = StratifiedKFold(n_splits=k, shuffle=True, random_state=RANDOM_SEED)
+    else:
+        folder = KFold(n_splits=k, shuffle=True, random_state=RANDOM_SEED)
+
+    scores = []
+    for fold_idx, (train_idx, val_idx) in enumerate(folder.split(X, y)):
+        X_fold_train = X.iloc[train_idx] if hasattr(X, "iloc") else X[train_idx]
+        X_fold_val = X.iloc[val_idx] if hasattr(X, "iloc") else X[val_idx]
+        y_fold_train = y.iloc[train_idx] if hasattr(y, "iloc") else y[train_idx]
+        y_fold_val = y.iloc[val_idx] if hasattr(y, "iloc") else y[val_idx]
+
+        fold_model = copy.deepcopy(model)
+        fold_model.fit(X_fold_train, y_fold_train)
+        score = evaluate(fold_model, X_fold_val, y_fold_val)
+        scores.append(score)
+
+    return np.mean(scores), np.std(scores), scores
+
+
 def is_better(new_score, old_score):
     """Returns True if new_score is better than old_score."""
     if old_score is None:
@@ -298,6 +327,7 @@ from prepare import (
     load_data,
     split_data,
     evaluate,
+    cross_validate,
     get_feature_info,
 )
 
@@ -397,16 +427,28 @@ if training_time > TIME_BUDGET:
     print(f"WARNING: Training exceeded time budget ({training_time:.0f}s > {TIME_BUDGET}s)")
 
 # ---------------------------------------------------------------------------
-# Evaluation — train + val (to detect overfitting)
+# Evaluation — CV (primary) + holdout (sanity check)
 # ---------------------------------------------------------------------------
 
-train_score = evaluate(model, X_train, y_train)
+# Cross-validation — this is the score used for keep/discard decisions
+print(f"\\nRunning 5-fold cross-validation...")
+t_cv_start = time.time()
+cv_mean, cv_std, cv_folds = cross_validate(model, X_train, y_train, k=5)
+cv_time = time.time() - t_cv_start
+print(f"CV completed in {cv_time:.1f}s")
+
+# Holdout — sanity check (agent can't game this)
 val_score = evaluate(model, X_val, y_val)
+train_score = evaluate(model, X_train, y_train)
 total_time = time.time() - t_start
 
 print("---")
+print(f"cv_{METRIC_NAME}:      {cv_mean:.6f} +/- {cv_std:.6f}  <- USE THIS for keep/discard")
+print(f"cv_folds:         {[round(s, 4) for s in cv_folds]}")
+print(f"val_{METRIC_NAME}:     {val_score:.6f}  <- holdout sanity check")
 print(f"train_{METRIC_NAME}:   {train_score:.6f}")
-print(f"val_{METRIC_NAME}:     {val_score:.6f}")
+
+# Overfitting check
 if METRIC_DIRECTION == "lower":
     gap = val_score - train_score
     overfit = gap > 0 and gap > val_score * 0.2
@@ -415,7 +457,13 @@ else:
     overfit = gap > 0 and gap > val_score * 0.2
 if overfit:
     print(f"WARNING: Possible overfitting (train-val gap: {abs(gap):.4f}). Try regularization or fewer estimators.")
+
+# CV stability check
+if cv_std > abs(cv_mean) * 0.2:
+    print(f"WARNING: High CV variance (std/mean = {cv_std/abs(cv_mean)*100:.0f}%). Results may be unstable.")
+
 print(f"training_seconds: {training_time:.1f}")
+print(f"cv_seconds:       {cv_time:.1f}")
 print(f"total_seconds:    {total_time:.1f}")
 n_total = len(numeric_features) + len(low_card_cats) + len(high_card_cats)
 print(f"n_features:       {n_total}")
@@ -447,14 +495,16 @@ except Exception:
 # Time budget suggestion
 # ---------------------------------------------------------------------------
 
-if training_time < 1:
+# Account for CV time (5 folds ≈ 5x training)
+experiment_time = training_time + cv_time
+if experiment_time < 5:
     suggested = 60
-elif training_time < 10:
-    suggested = int(training_time * 20)
-elif training_time < 60:
-    suggested = int(training_time * 10)
+elif experiment_time < 30:
+    suggested = int(experiment_time * 10)
+elif experiment_time < 120:
+    suggested = int(experiment_time * 5)
 else:
-    suggested = int(training_time * 5)
+    suggested = int(experiment_time * 3)
 
 # Round to nice number
 if suggested < 60:
@@ -466,17 +516,17 @@ else:
 
 print()
 print(f"--- Time Budget Suggestion ---")
-print(f"Baseline training took {training_time:.1f}s.")
+print(f"Baseline: {training_time:.1f}s training + {cv_time:.1f}s CV = {experiment_time:.1f}s total per experiment")
 print(f"Current TIME_BUDGET in prepare.py: {TIME_BUDGET}s ({TIME_BUDGET // 60} min)")
 print(f"Suggested TIME_BUDGET: {suggested}s ({suggested // 60} min)")
-if training_time < 5:
+if experiment_time < 10:
     print(f"Baseline is fast. Agent can try much heavier models (deeper trees, ensembles, neural nets).")
     print(f"Consider {suggested}s-{suggested * 3}s to give room for complex experiments.")
-elif training_time > TIME_BUDGET * 0.8:
-    print(f"WARNING: Baseline already uses {training_time/TIME_BUDGET*100:.0f}% of the budget.")
+elif experiment_time > TIME_BUDGET * 0.8:
+    print(f"WARNING: Baseline already uses {experiment_time/TIME_BUDGET*100:.0f}% of the budget.")
     print(f"Increase TIME_BUDGET so the agent has room to try heavier models.")
 else:
-    print(f"Good headroom. Agent can try models up to ~{TIME_BUDGET // int(max(training_time, 1))}x heavier.")
+    print(f"Good headroom. Agent can try models up to ~{TIME_BUDGET // int(max(experiment_time, 1))}x heavier.")
 '''
 
 
@@ -494,7 +544,7 @@ def generate_program(data_path, target_column, task_type, metric_key, time_budge
 
 ## Rules
 
-**Goal:** {direction_text} `val_{metric_key}`.
+**Goal:** {direction_text} `cv_{metric_key}` (5-fold cross-validation score).
 
 **Time budget:** {time_budget // 60} minutes per experiment.
 
@@ -529,17 +579,18 @@ LOOP FOREVER:
 1. Edit `train.py` with an experimental idea
 2. Commit: `git add train.py && git commit -m "experiment: <description>"`
 3. Run: `uv run train.py > run.log 2>&1`
-4. Check: `grep "^val_{metric_key}:" run.log`
-5. If crash: `tail -n 50 run.log`, attempt fix
-6. Log to `results.tsv`
-7. If improved: keep. If worse: revert.
+4. Check: `grep "^cv_{metric_key}:" run.log` (this is the primary metric)
+5. Also check: `grep "^val_{metric_key}:" run.log` (holdout sanity check)
+6. If crash: `tail -n 50 run.log`, attempt fix
+7. Log to `results.tsv`
+8. If `cv_{metric_key}` improved AND `val_{metric_key}` didn't degrade badly: keep. Otherwise: revert.
 
 ## Logging
 
 Tab-separated `results.tsv`:
 
 ```
-commit\\tval_{metric_key}\\tstatus\\tdescription
+commit\\tcv_{metric_key}\\tval_{metric_key}\\tstatus\\tdescription
 ```
 
 **NEVER STOP.** Run autonomously until manually interrupted.
