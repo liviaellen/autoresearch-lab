@@ -1,6 +1,6 @@
 # autoresearch-lab
 
-General-purpose autonomous research engine. Extends [karpathy/autoresearch](https://github.com/karpathy/autoresearch) with an experiment scaffold and Apple Silicon support.
+General-purpose autonomous research engine. Extends [karpathy/autoresearch](https://github.com/karpathy/autoresearch) with an LLM-powered experiment scaffold and Apple Silicon support.
 
 An AI agent runs experiments autonomously — modifying code, training, evaluating, keeping improvements, discarding failures — in a loop, while you sleep.
 
@@ -13,7 +13,7 @@ The original [autoresearch](https://github.com/karpathy/autoresearch) proved tha
 ```
 The pattern:
 
-    1. Point at your data            → auto-detects target/task/metric
+    1. Point at your data            → chat with LLM about what to predict
     2. Scaffold the experiment       → prepare.py + train.py + program.md
     3. Run the baseline              → prints score, overfitting, top features
     4. Let the agent experiment      → train.py (agent edits this)
@@ -29,29 +29,29 @@ The pattern:
 ```bash
 git clone <repo-url>
 cd autoresearch-lab
-uv pip install -e ".[domain]"
+uv pip install -e ".[domain,llm]"
 
-# Auto-detect — just point at your data
+# Interactive — LLM looks at your data and asks what you want to predict
 uv run python -m generator.scaffold \
     --data path/to/data.csv \
     --output-dir experiments/my-experiment
 
-# Or specify everything manually
+# One-shot — describe your goal in text
+uv run python -m generator.scaffold \
+    --data path/to/data.csv \
+    --output-dir experiments/my-experiment \
+    --description "predict house prices from square footage and location"
+
+# Manual — skip LLM entirely
 uv run python -m generator.scaffold \
     --data path/to/data.csv \
     --target target_column \
     --metric mae \
     --task regression \
     --output-dir experiments/my-experiment
-
-# With LLM-powered auto-detect (smarter analysis)
-uv run python -m generator.scaffold \
-    --data path/to/data.csv \
-    --output-dir experiments/my-experiment \
-    --llm --model gpt4o
 ```
 
-Auto-detect analyzes your data and picks the target column, task type, and metric. You can override any of them.
+The LLM analyzes your data, chats with you about what to predict, and picks the right target/task/metric. You can also pass `--description` for a non-interactive one-shot, or specify `--target --metric --task` manually to skip the LLM.
 
 Supported metrics: `mae`, `rmse`, `r2` (regression) | `auc`, `f1`, `accuracy` (classification)
 
@@ -101,7 +101,7 @@ The agent only commits `train.py` — never pushes, never commits logs or result
 
 - **`prepare.py`** is generated per-experiment with the data path, target column, metric, and eval function baked in. Read-only.
 - **`train.py`** is universal — one file works for any dataset. It reads `TASK_TYPE` from `prepare.py` and auto-selects the right model (GradientBoostingRegressor or GradientBoostingClassifier). The agent modifies this file.
-- **Auto-detect** analyzes column types, names, and cardinality to guess target/task/metric. You can override any field.
+- **LLM chat** profiles your data and has a conversation to determine target/task/metric. Pass `--description` for one-shot or `--target --metric --task` to skip the LLM.
 - **Time budget suggestion** — after the baseline runs, it suggests an appropriate `TIME_BUDGET` based on training time.
 - **Flow diagram** — each experiment gets a customized Excalidraw diagram showing the data flow and experiment loop.
 
@@ -122,7 +122,7 @@ uv run prepare.py && uv run train.py
 
 ## Environment setup
 
-Copy `.env.example` to `.env` and fill in API keys (only needed for `--llm` auto-detect):
+Copy `.env.example` to `.env` and fill in your LLM API key:
 
 ```bash
 cp .env.example .env
@@ -156,27 +156,20 @@ autoresearch-lab/
 ## Install
 
 ```bash
-# Base
-uv sync
+# Scaffold experiments (recommended)
+uv pip install -e ".[domain,llm]"
 
-# With experiment scaffolding (pandas, sklearn)
-uv pip install -e ".[domain]"
-
-# With LLM auto-detect
-uv pip install -e ".[llm]"
-
-# With Apple Silicon training
+# With Apple Silicon training (language modeling demo)
 uv pip install -e ".[mlx]"
 
-# With NVIDIA GPU training
+# With NVIDIA GPU training (language modeling demo)
 uv pip install -e ".[cuda]"
 ```
 
 ## Roadmap
 
 - [x] Dual backend (CUDA + MLX)
-- [x] Experiment scaffold (auto-generate prepare.py + train.py from data)
-- [x] Auto-detect target/task/metric from data (heuristic + LLM)
+- [x] LLM-powered experiment scaffold (chat → prepare.py + train.py + program.md)
 - [x] Universal train.py (one file works for regression and classification)
 - [x] Flow diagram generation (Excalidraw per experiment)
 - [x] Time budget suggestion (based on baseline training time)

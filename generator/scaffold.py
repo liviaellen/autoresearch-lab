@@ -1,26 +1,24 @@
 """
-Scaffold generator — creates a runnable experiment directory from user inputs.
+Scaffold generator — creates a runnable experiment directory from your data.
 
-Given a data path, target column, metric, and task type, generates:
+Point at a dataset, chat with an LLM about what you want to predict,
+and it generates a complete experiment:
     1. prepare.py  — data loading, splitting, eval function (READ-ONLY)
     2. train.py    — baseline model (agent edits this)
     3. program.md  — experiment rules
+    4. flow.excalidraw — visual flow diagram
 
 Usage:
-    python -m generator.scaffold \\
-        --data crop_data.csv \\
-        --target yield \\
-        --metric mae \\
-        --task regression \\
-        --output-dir experiments/agriculture
+    # Interactive chat (default) — LLM asks what you want to predict
+    python -m generator.scaffold --data crops.csv --output-dir experiments/crop
 
-    python -m generator.scaffold \\
-        --data patients.parquet \\
-        --target diagnosis \\
-        --metric auc \\
-        --task classification \\
-        --time-budget 300 \\
-        --output-dir experiments/healthcare
+    # One-shot — describe your goal
+    python -m generator.scaffold --data crops.csv --output-dir experiments/crop \\
+        --description "predict crop yield from soil and weather"
+
+    # Manual — skip LLM, specify everything
+    python -m generator.scaffold --data crops.csv --output-dir experiments/crop \\
+        --target yield --metric mae --task regression
 """
 
 import argparse
@@ -890,16 +888,16 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""\
 Examples:
-  # Auto-detect everything (just provide data)
-  python -m generator.scaffold --data data/crops.csv --output-dir experiments/crop-yield
+  # Interactive chat (default) — LLM helps you set up
+  python -m generator.scaffold --data data.csv --output-dir experiments/my-exp
 
-  # Auto-detect with LLM (smarter analysis)
-  python -m generator.scaffold --data data/crops.csv --output-dir experiments/crop-yield --llm --model gpt4o
+  # One-shot — describe what you want
+  python -m generator.scaffold --data data.csv --output-dir experiments/my-exp \\
+      --description "predict crop yield from soil and weather"
 
-  # Manual (specify everything)
-  python -m generator.scaffold \\
-      --data data/crops.csv --target yield --metric mae --task regression \\
-      --output-dir experiments/crop-yield
+  # Manual — skip LLM entirely
+  python -m generator.scaffold --data data.csv --output-dir experiments/my-exp \\
+      --target yield --metric mae --task regression
 
 Available metrics:
   Regression:     mae, rmse, r2
@@ -907,47 +905,52 @@ Available metrics:
 """,
     )
     parser.add_argument("--data", required=True, help="Path to dataset (CSV, Parquet, JSON, Excel)")
-    parser.add_argument("--target", help="Target column name (auto-detected if omitted)")
-    parser.add_argument("--metric", help="Evaluation metric (auto-detected if omitted)")
-    parser.add_argument("--task", choices=["regression", "classification"], help="Task type (auto-detected if omitted)")
+    parser.add_argument("--target", help="Target column (skips LLM if all 3 specified)")
+    parser.add_argument("--metric", help="Evaluation metric (skips LLM if all 3 specified)")
+    parser.add_argument("--task", choices=["regression", "classification"], help="Task type (skips LLM if all 3 specified)")
     parser.add_argument("--output-dir", required=True, help="Directory to generate experiment files into")
     parser.add_argument("--time-budget", type=int, default=300, help="Time budget in seconds (default: 300)")
     parser.add_argument("--name", help="Experiment name (default: output dir name)")
-    parser.add_argument("--llm", action="store_true", help="Use LLM agent to analyze data")
-    parser.add_argument("--model", default="local", help="LLM model for --llm mode (default: local)")
-    parser.add_argument("--base-url", help="Custom API base URL for --llm mode")
+    parser.add_argument("--model", default="gpt4o", help="LLM model (default: gpt4o)")
+    parser.add_argument("--base-url", help="Custom API base URL")
+    parser.add_argument("--description", help="Describe your goal (one-shot, skips interactive chat)")
 
     args = parser.parse_args()
 
-    # Auto-detect missing settings
-    needs_detect = not all([args.target, args.metric, args.task])
-    if needs_detect:
+    # If all three are specified manually, skip LLM entirely
+    manual_mode = all([args.target, args.metric, args.task])
+
+    if manual_mode:
         if not os.path.exists(args.data):
-            parser.error(f"Data file '{args.data}' not found. Auto-detection requires the file to exist.")
+            print(f"Warning: Data file '{args.data}' not found.")
+            print(f"Make sure the file exists before running the experiment.\n")
+    else:
+        # LLM chat mode (interactive or one-shot)
+        if not os.path.exists(args.data):
+            parser.error(f"Data file '{args.data}' not found.")
 
         from generator.auto_detect import detect
 
-        llm_model = args.model if args.llm else None
-        detected = detect(args.data, model=llm_model, base_url=args.base_url)
+        detected = detect(
+            args.data,
+            model=args.model,
+            base_url=args.base_url,
+            description=args.description,
+        )
 
-        print(f"Auto-detected from {args.data} ({detected['source']}):")
+        # Use detected values for anything not manually specified
         if not args.target:
             args.target = detected["target"]
-            reason = detected["reasoning"] if isinstance(detected["reasoning"], str) else detected["reasoning"].get("target", "")
-            print(f"  Target: {args.target}  ({reason})")
         if not args.task:
             args.task = detected["task"]
-            reason = detected["reasoning"] if isinstance(detected["reasoning"], str) else detected["reasoning"].get("task", "")
-            print(f"  Task:   {args.task}  ({reason})")
         if not args.metric:
             args.metric = detected["metric"]
-            reason = detected["reasoning"] if isinstance(detected["reasoning"], str) else detected["reasoning"].get("metric", "")
-            print(f"  Metric: {args.metric}  ({reason})")
+
+        reason = detected.get("reasoning", "")
+        print(f"\n  Setup: target={args.target}, task={args.task}, metric={args.metric}")
+        if reason:
+            print(f"  Reason: {reason}")
         print()
-    else:
-        if not os.path.exists(args.data):
-            print(f"Warning: Data file '{args.data}' not found. Files will be generated anyway.")
-            print(f"Make sure the file exists before running the experiment.\n")
 
     scaffold(
         data_path=args.data,
@@ -969,9 +972,7 @@ Available metrics:
     print()
     print(f"Next steps:")
     print(f"  cd {args.output_dir}")
-    print(f"  uv sync")
-    print(f"  uv run prepare.py          # validate data loads correctly")
-    print(f"  uv run train.py            # run baseline experiment")
+    print(f"  uv run python train.py     # run baseline")
     print()
     print(f"  Metric: {metric['name']} ({metric['direction']} is better)")
     print(f"  Target: {args.target}")

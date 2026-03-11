@@ -210,10 +210,6 @@ wheels = [
 name = "autoresearch-lab"
 version = "0.1.0"
 source = { editable = "." }
-dependencies = [
-    { name = "jinja2" },
-    { name = "pyyaml" },
-]
 
 [package.optional-dependencies]
 cuda = [
@@ -239,14 +235,8 @@ domain = [
     { name = "scikit-learn", version = "1.7.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scikit-learn", version = "1.8.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
 ]
-generator = [
-    { name = "jinja2" },
-    { name = "pyyaml" },
-]
 llm = [
-    { name = "jinja2" },
     { name = "litellm" },
-    { name = "pyyaml" },
 ]
 mlx = [
     { name = "mlx" },
@@ -261,9 +251,6 @@ mlx = [
 
 [package.metadata]
 requires-dist = [
-    { name = "jinja2" },
-    { name = "jinja2", marker = "extra == 'generator'" },
-    { name = "jinja2", marker = "extra == 'llm'" },
     { name = "kernels", marker = "extra == 'cuda'" },
     { name = "litellm", marker = "extra == 'llm'" },
     { name = "matplotlib", marker = "extra == 'cuda'" },
@@ -277,9 +264,6 @@ requires-dist = [
     { name = "pyarrow", marker = "extra == 'cuda'" },
     { name = "pyarrow", marker = "extra == 'domain'" },
     { name = "pyarrow", marker = "extra == 'mlx'" },
-    { name = "pyyaml" },
-    { name = "pyyaml", marker = "extra == 'generator'" },
-    { name = "pyyaml", marker = "extra == 'llm'" },
     { name = "regex", marker = "extra == 'mlx'" },
     { name = "requests", marker = "extra == 'cuda'" },
     { name = "requests", marker = "extra == 'mlx'" },
@@ -290,7 +274,7 @@ requires-dist = [
     { name = "tiktoken", marker = "extra == 'mlx'" },
     { name = "torch", marker = "extra == 'cuda'", specifier = "==2.9.1" },
 ]
-provides-extras = ["cuda", "mlx", "generator", "llm", "domain"]
+provides-extras = ["cuda", "mlx", "domain", "llm"]
 
 [[package]]
 name = "certifi"

@@ -9,7 +9,7 @@ Point it at any tabular dataset — it scaffolds a complete experiment (prepare.
 
 ```
 Data (CSV/Parquet/Excel)
-    ↓ auto-detect target/task/metric (heuristic or LLM)
+    ↓ LLM chat: "what do you want to predict?"
 Scaffold (generator/scaffold.py)
     ↓
 Experiment directory:
@@ -32,9 +32,9 @@ train.py / prepare.py           — CUDA backend (language modeling demo)
 train_mlx.py / prepare_mlx.py   — MLX backend (Apple Silicon)
 program.md                       — experiment protocol
 generator/                       — scaffold system
-  scaffold.py                    — experiment scaffolder (data → full experiment dir)
-  auto_detect.py                 — auto-detect target/task/metric from data
-  llm_client.py                  — provider-agnostic LLM client (for LLM auto-detect)
+  scaffold.py                    — experiment scaffolder (data → chat → full experiment dir)
+  auto_detect.py                 — LLM chat to determine target/task/metric
+  llm_client.py                  — provider-agnostic LLM client (LiteLLM)
 experiments/                     — scaffolded experiment directories (gitignored)
 ```
 
@@ -48,19 +48,19 @@ experiments/                     — scaffolded experiment directories (gitignor
 ## Running
 
 ```bash
-# Scaffold a domain experiment from data
+# Interactive chat — LLM asks what you want to predict
 uv run python -m generator.scaffold \
     --data path/to/data.csv --output-dir experiments/my-exp
 
-# With manual overrides
+# One-shot — describe your goal
+uv run python -m generator.scaffold \
+    --data path/to/data.csv --output-dir experiments/my-exp \
+    --description "predict yield from soil data"
+
+# Manual — skip LLM
 uv run python -m generator.scaffold \
     --data path/to/data.csv --target column_name \
     --metric mae --task regression --output-dir experiments/my-exp
-
-# With LLM-powered auto-detect
-uv run python -m generator.scaffold \
-    --data path/to/data.csv --output-dir experiments/my-exp \
-    --llm --model gpt4o
 
 # Run the scaffolded experiment
 cd experiments/my-exp && uv run python train.py
@@ -75,9 +75,7 @@ uv run train.py                    # CUDA
 ## Dependencies
 
 ```bash
-uv sync                           # Base
-uv pip install -e ".[domain]"     # Scaffold (pandas, sklearn)
-uv pip install -e ".[llm]"        # + LLM auto-detect (litellm)
+uv pip install -e ".[domain,llm]" # Scaffold (pandas, sklearn, litellm)
 uv pip install -e ".[mlx]"        # + MLX training backend
 uv pip install -e ".[cuda]"       # + CUDA training backend
 ```
