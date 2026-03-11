@@ -1,12 +1,9 @@
 [project]
 name = "autoresearch-lab"
 version = "0.1.0"
-description = "General-purpose autonomous research engine with program generation"
+description = "General-purpose autonomous research engine"
 requires-python = ">=3.10"
-dependencies = [
-    "pyyaml",
-    "jinja2",
-]
+dependencies = []
 
 [project.optional-dependencies]
 # CUDA backend (karpathy/autoresearch original)
@@ -31,24 +28,17 @@ mlx = [
     "rustbpe",
     "tiktoken",
 ]
-# Program generator (lightweight, no ML deps)
-generator = [
-    "pyyaml",
-    "jinja2",
-]
-# LLM-powered generator (supports any provider via litellm)
-llm = [
-    "pyyaml",
-    "jinja2",
-    "litellm",
-]
-# Domain experiment scaffolding
+# Experiment scaffolding (tabular ML)
 domain = [
     "pandas",
     "numpy",
     "scikit-learn",
     "pyarrow",
     "openpyxl",
+]
+# LLM-powered auto-detect
+llm = [
+    "litellm",
 ]
 
 [tool.hatch.build.targets.wheel]
