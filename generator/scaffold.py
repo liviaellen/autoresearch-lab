@@ -170,6 +170,14 @@ def load_data():
             f"Available columns: {{list(df.columns)}}"
         )
 
+    # Validate target
+    target_missing = df[TARGET_COLUMN].isnull().sum()
+    if target_missing > 0:
+        print(f"WARNING: Target '{{TARGET_COLUMN}}' has {{target_missing}} missing values ({{target_missing/len(df)*100:.1f}}%). Dropping them.")
+        df = df.dropna(subset=[TARGET_COLUMN])
+    if df[TARGET_COLUMN].nunique() <= 1:
+        raise ValueError(f"Target '{{TARGET_COLUMN}}' has only {{df[TARGET_COLUMN].nunique()}} unique value(s). Nothing to predict.")
+
     print(f"Loaded {{len(df)}} rows, {{len(df.columns)}} columns from {{path}}")
     print(f"Target: {{TARGET_COLUMN}} | Task: {{TASK_TYPE}} | Metric: {{METRIC_NAME}}")
     return df
@@ -206,7 +214,8 @@ def is_better(new_score, old_score):
 # ---------------------------------------------------------------------------
 
 def get_feature_info(df):
-    """Print summary of features for the agent's reference."""
+    """Print summary of features and target for the agent's reference."""
+    y = df[TARGET_COLUMN]
     X = df.drop(columns=[TARGET_COLUMN])
     numeric = X.select_dtypes(include=["number"]).columns.tolist()
     categorical = X.select_dtypes(include=["object", "category"]).columns.tolist()
@@ -214,11 +223,36 @@ def get_feature_info(df):
     missing = X.isnull().sum()
     missing = missing[missing > 0]
 
-    print(f"\\nFeature summary:")
+    # Target distribution
+    print(f"\\nTarget: {{TARGET_COLUMN}}")
+    if TASK_TYPE == "classification":
+        counts = y.value_counts()
+        total = len(y)
+        print(f"  Classes ({{len(counts)}}):")
+        for cls, cnt in counts.items():
+            print(f"    {{cls}}: {{cnt}} ({{cnt/total*100:.1f}}%)")
+        majority_pct = counts.iloc[0] / total * 100
+        if majority_pct > 80:
+            print(f"  WARNING: Imbalanced — majority class is {{majority_pct:.0f}}% of data")
+    else:
+        print(f"  min={{y.min():.3g}}, max={{y.max():.3g}}, mean={{y.mean():.3g}}, median={{y.median():.3g}}, std={{y.std():.3g}}")
+        skew = y.skew()
+        if abs(skew) > 1:
+            print(f"  WARNING: Skewed distribution (skew={{skew:.2f}}). Consider log-transform.")
+
+    # Feature summary
+    print(f"\\nFeatures ({{len(X.columns)}}):")
     print(f"  Numeric ({{len(numeric)}}): {{numeric[:10]}}{{\'...\' if len(numeric) > 10 else \'\'}}")
     print(f"  Categorical ({{len(categorical)}}): {{categorical[:10]}}{{\'...\' if len(categorical) > 10 else \'\'}}")
     if datetime_cols:
         print(f"  Datetime ({{len(datetime_cols)}}): {{datetime_cols}}")
+
+    # High-cardinality warnings
+    for col in categorical:
+        n_unique = X[col].nunique()
+        if n_unique > 50:
+            print(f"  WARNING: '{{col}}' has {{n_unique}} unique values — consider target encoding instead of one-hot")
+
     if len(missing) > 0:
         print(f"  Missing values: {{dict(missing)}}")
     else:
@@ -253,7 +287,7 @@ import numpy as np
 import pandas as pd
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler, OrdinalEncoder, OneHotEncoder
 from sklearn.impute import SimpleImputer
 from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
 
@@ -278,6 +312,7 @@ warnings.filterwarnings("ignore")
 N_ESTIMATORS = 100
 LEARNING_RATE = 0.1
 MAX_DEPTH = 5
+MAX_CATEGORICAL_CARDINALITY = 50  # OHE below this, ordinal above
 
 # ---------------------------------------------------------------------------
 # Setup
@@ -293,27 +328,38 @@ X_train, X_val, y_train, y_val = split_data(df)
 numeric_features = X_train.select_dtypes(include=["number"]).columns.tolist()
 categorical_features = X_train.select_dtypes(include=["object", "category"]).columns.tolist()
 
+# Split categoricals: low-cardinality (one-hot) vs high-cardinality (ordinal)
+low_card_cats = [c for c in categorical_features if X_train[c].nunique() <= MAX_CATEGORICAL_CARDINALITY]
+high_card_cats = [c for c in categorical_features if X_train[c].nunique() > MAX_CATEGORICAL_CARDINALITY]
+
 print(f"Task: {TASK_TYPE} | Metric: {METRIC_NAME} ({METRIC_DIRECTION} is better)")
-print(f"Using {len(numeric_features)} numeric + {len(categorical_features)} categorical features")
+print(f"Using {len(numeric_features)} numeric + {len(low_card_cats)} low-card cat + {len(high_card_cats)} high-card cat features")
 
 # ---------------------------------------------------------------------------
 # Preprocessing pipeline
 # ---------------------------------------------------------------------------
 
-numeric_transformer = Pipeline([
-    ("imputer", SimpleImputer(strategy="median")),
-    ("scaler", StandardScaler()),
-])
+transformers = []
 
-categorical_transformer = Pipeline([
-    ("imputer", SimpleImputer(strategy="most_frequent")),
-    ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
-])
+if numeric_features:
+    transformers.append(("num", Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scaler", StandardScaler()),
+    ]), numeric_features))
 
-preprocessor = ColumnTransformer([
-    ("num", numeric_transformer, numeric_features),
-    ("cat", categorical_transformer, categorical_features),
-])
+if low_card_cats:
+    transformers.append(("cat_low", Pipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+        ("encoder", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+    ]), low_card_cats))
+
+if high_card_cats:
+    transformers.append(("cat_high", Pipeline([
+        ("imputer", SimpleImputer(strategy="most_frequent")),
+        ("encoder", OrdinalEncoder(handle_unknown="use_encoded_value", unknown_value=-1)),
+    ]), high_card_cats))
+
+preprocessor = ColumnTransformer(transformers) if transformers else "passthrough"
 
 # ---------------------------------------------------------------------------
 # Model — auto-selects based on TASK_TYPE from prepare.py
@@ -353,22 +399,51 @@ if training_time > TIME_BUDGET:
     print(f"WARNING: Training exceeded time budget ({training_time:.0f}s > {TIME_BUDGET}s)")
 
 # ---------------------------------------------------------------------------
-# Evaluation
+# Evaluation — train + val (to detect overfitting)
 # ---------------------------------------------------------------------------
 
-score = evaluate(model, X_val, y_val)
+train_score = evaluate(model, X_train, y_train)
+val_score = evaluate(model, X_val, y_val)
 total_time = time.time() - t_start
 
 print("---")
-print(f"val_{METRIC_NAME}:     {score:.6f}")
+print(f"train_{METRIC_NAME}:   {train_score:.6f}")
+print(f"val_{METRIC_NAME}:     {val_score:.6f}")
+if METRIC_DIRECTION == "lower":
+    gap = val_score - train_score
+    overfit = gap > 0 and gap > val_score * 0.2
+else:
+    gap = train_score - val_score
+    overfit = gap > 0 and gap > val_score * 0.2
+if overfit:
+    print(f"WARNING: Possible overfitting (train-val gap: {abs(gap):.4f}). Try regularization or fewer estimators.")
 print(f"training_seconds: {training_time:.1f}")
 print(f"total_seconds:    {total_time:.1f}")
-print(f"n_features:       {len(numeric_features) + len(categorical_features)}")
+n_total = len(numeric_features) + len(low_card_cats) + len(high_card_cats)
+print(f"n_features:       {n_total}")
 print(f"n_train:          {len(X_train)}")
 print(f"n_val:            {len(X_val)}")
 print(f"model:            {estimator.__class__.__name__}")
 print(f"n_estimators:     {N_ESTIMATORS}")
 print(f"max_depth:        {MAX_DEPTH}")
+
+# ---------------------------------------------------------------------------
+# Feature importance (top 15)
+# ---------------------------------------------------------------------------
+
+try:
+    importances = estimator.feature_importances_
+    if hasattr(preprocessor, "get_feature_names_out"):
+        feature_names = preprocessor.get_feature_names_out()
+    else:
+        feature_names = [f"f{i}" for i in range(len(importances))]
+    sorted_idx = np.argsort(importances)[::-1]
+    print(f"\\nTop features:")
+    for i in sorted_idx[:15]:
+        name = feature_names[i] if i < len(feature_names) else f"f{i}"
+        print(f"  {name:40s} {importances[i]:.4f}")
+except Exception:
+    pass
 
 # ---------------------------------------------------------------------------
 # Time budget suggestion
@@ -695,6 +770,16 @@ def scaffold(
     if metric_key not in METRICS:
         available = ", ".join(METRICS.keys())
         raise ValueError(f"Unknown metric '{metric_key}'. Available: {available}")
+
+    # Validate metric matches task type
+    expected_task = METRICS[metric_key]["task"]
+    if expected_task != task_type:
+        reg_metrics = [k for k, v in METRICS.items() if v["task"] == "regression"]
+        cls_metrics = [k for k, v in METRICS.items() if v["task"] == "classification"]
+        raise ValueError(
+            f"Metric '{metric_key}' is for {expected_task}, but task is '{task_type}'. "
+            f"Use: {reg_metrics if task_type == 'regression' else cls_metrics}"
+        )
 
     if not experiment_name:
         experiment_name = os.path.basename(output_dir) or "experiment"
